@@ -250,6 +250,35 @@ class GameController:
         """Get the color of the player whose turn it is."""
         return self.current_turn
 
+    def _get_all_valid_moves(self) -> list:
+        """Get all valid moves for the current player."""
+        valid_moves = []
+        for row in range(8):
+            for col in range(8):
+                piece = self.board.get_piece(row, col)
+                if piece and piece.color == self.current_turn:
+                    moves = piece.get_possible_moves(row, col, self.board)
+                    for move in moves:
+                        # Test if move is legal (doesn't put king in check)
+                        to_row, to_col = move
+                        captured_piece = self.board.get_piece(to_row, to_col)
+                        
+                        # Make move
+                        self.board.move_piece(row, col, to_row, to_col)
+                        
+                        # Check if move is legal
+                        is_legal = not self.is_check(self.current_turn)
+                        
+                        # Undo move
+                        self.board.move_piece(to_row, to_col, row, col)
+                        if captured_piece:
+                            self.board.place_piece(to_row, to_col, captured_piece)
+                        
+                        if is_legal:
+                            valid_moves.append(((row, col), move))
+        
+        return valid_moves
+
     def is_ai_turn(self) -> bool:
         """Check if it's AI's turn to move."""
         return self.ai_player and self.current_turn == self.ai_player

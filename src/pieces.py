@@ -43,8 +43,10 @@ class Pawn(Piece):
                 
                 # Initial two-square move
                 if not self.moved:
-                    if board.get_piece(row + 2 * direction, col) is None:
-                        moves.append((row + 2 * direction, col))
+                    two_squares_ahead = row + 2 * direction
+                    if (board.is_valid_position(two_squares_ahead, col) and
+                            board.get_piece(two_squares_ahead, col) is None):
+                        moves.append((two_squares_ahead, col))
         
         # Capture moves (diagonal)
         for col_offset in [-1, 1]:
