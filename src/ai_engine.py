@@ -94,26 +94,95 @@ class AIEngine:
         self.nodes_searched = 0
         best_move = None
         best_score = float('-inf')
-        max_depth = 1
+        current_depth = self.min_depth
         
         # Initialize history table for move ordering
         self.history_table = {}
         
-        try:
-            # Iterative deepening
-            while time.time() - self.start_time < self.max_time:
-                score, move = self._iterative_deepening(max_depth)
-                if move:  # Only update if we found a valid move
-                    best_move = move
-                    best_score = score
-                max_depth += 1
+        # Get all possible moves
+        board = self.game.board
+        possible_moves = []
+        for row in range(8):
+            for col in range(8):
+                piece = board.get_piece(row, col)
+                if piece and piece.color == self.color:
+                    moves = piece.get_possible_moves(row, col, board)
+                    for move in moves:
+                        possible_moves.append(((row, col), move))
+        
+        if not possible_moves:
+            return None
+        
+        # Search first at minimum depth
+        for from_pos, to_pos in possible_moves:
+            from_row, from_col = from_pos
+            to_row, to_col = to_pos
+            piece = board.get_piece(from_row, from_col)
+            if not piece:
+                continue
+            
+            captured = board.get_piece(to_row, to_col)
+            
+            try:
+                board.move_piece(from_row, from_col, to_row, to_col)
                 
-                # Print search statistics
+                # Verify move doesn't leave us in check
+                if not self.game.is_check(self.color):
+                    score = -self._negamax(current_depth - 1, float('-inf'), float('inf'), -1)
+                    if score > best_score:
+                        best_score = score
+                        best_move = (from_pos, to_pos)
+            finally:
+                board.move_piece(to_row, to_col, from_row, from_col)
+                if captured:
+                    board.place_piece(to_row, to_col, captured)
+        
+        # Print initial search results
+        elapsed = time.time() - self.start_time
+        print(f"Depth {current_depth}: Score {best_score:.2f}, "
+              f"Nodes: {self.nodes_searched}, Time: {elapsed:.2f}s")
+        
+        # Continue with iterative deepening if time permits
+        current_depth += 1
+        while (current_depth <= self.max_depth and
+               time.time() - self.start_time < self.max_time - 0.1):  # Leave some safety margin
+            try:
+                current_best_move = None
+                current_best_score = float('-inf')
+                
+                for from_pos, to_pos in possible_moves:
+                    from_row, from_col = from_pos
+                    to_row, to_col = to_pos
+                    piece = board.get_piece(from_row, from_col)
+                    if not piece:
+                        continue
+                    
+                    captured = board.get_piece(to_row, to_col)
+                    try:
+                        board.move_piece(from_row, from_col, to_row, to_col)
+                        
+                        # Verify move doesn't leave us in check
+                        if not self.game.is_check(self.color):
+                            score = -self._negamax(current_depth - 1, float('-inf'), float('inf'), -1)
+                            if score > current_best_score:
+                                current_best_score = score
+                                current_best_move = (from_pos, to_pos)
+                    finally:
+                        board.move_piece(to_row, to_col, from_row, from_col)
+                        if captured:
+                            board.place_piece(to_row, to_col, captured)
+                
+                if current_best_move:
+                    best_move = current_best_move
+                    best_score = current_best_score
+                
                 elapsed = time.time() - self.start_time
-                print(f"Depth {max_depth-1}: Score {best_score:.2f}, "
+                print(f"Depth {current_depth}: Score {best_score:.2f}, "
                       f"Nodes: {self.nodes_searched}, Time: {elapsed:.2f}s")
-        except TimeoutError:
-            pass
+                current_depth += 1
+                
+            except TimeoutError:
+                break
         
         return best_move
     
