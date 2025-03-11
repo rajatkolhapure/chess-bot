@@ -1,10 +1,9 @@
 from pieces import Pawn, Knight, Bishop, Rook, Queen, King
 import time
+from opening_book import OpeningBook
 
 class AIEngine:
     """Chess AI engine implementing minimax algorithm with advanced features."""
-    
-    # Basic piece values for evaluation
     PIECE_VALUES = {
         Pawn: 100,
         Knight: 320,
@@ -87,9 +86,17 @@ class AIEngine:
         self.history_table = {}  # Store move history scores
         self.min_depth = 3     # Minimum depth to search
         self.max_depth = 5     # Maximum depth to cap iterative deepening
+        self.opening_book = OpeningBook()  # Initialize opening book
     
     def get_best_move(self) -> tuple:
-        """Find the best move using iterative deepening."""
+        """Find the best move using opening book or iterative deepening search."""
+        # First try to find a move from the opening book
+        book_move = self.opening_book.get_book_move(self.game.board, self.color)
+        if book_move:
+            print("Book move found")
+            return book_move
+            
+        # If no book move found, use regular search
         self.start_time = time.time()
         self.nodes_searched = 0
         best_move = None
@@ -99,43 +106,115 @@ class AIEngine:
         # Initialize history table for move ordering
         self.history_table = {}
         
-        # Get all possible moves
+        # Get all possible moves and find a simple first valid move
         board = self.game.board
         possible_moves = []
+        first_valid_move = None
+        
         for row in range(8):
             for col in range(8):
                 piece = board.get_piece(row, col)
                 if piece and piece.color == self.color:
                     moves = piece.get_possible_moves(row, col, board)
                     for move in moves:
-                        possible_moves.append(((row, col), move))
+                        from_pos = (row, col)
+                        to_pos = move
+                        possible_moves.append((from_pos, to_pos))
+                        
+                        # Find first legal move as a fallback
+                        if first_valid_move is None:
+                            captured = board.get_piece(move[0], move[1])
+                            try:
+                                board.move_piece(row, col, move[0], move[1])
+                                if not self.game.is_check(self.color):
+                                    first_valid_move = (from_pos, to_pos)
+                                board.move_piece(move[0], move[1], row, col)
+                                if captured:
+                                    board.place_piece(move[0], move[1], captured)
+                            except ValueError:
+                                continue
         
         if not possible_moves:
             return None
-        
-        # Search first at minimum depth
-        for from_pos, to_pos in possible_moves:
-            from_row, from_col = from_pos
-            to_row, to_col = to_pos
-            piece = board.get_piece(from_row, from_col)
-            if not piece:
-                continue
             
-            captured = board.get_piece(to_row, to_col)
-            
-            try:
-                board.move_piece(from_row, from_col, to_row, to_col)
+        try:
+            # Initial search at minimum depth
+            for from_pos, to_pos in possible_moves:
+                from_row, from_col = from_pos
+                to_row, to_col = to_pos
+                piece = board.get_piece(from_row, from_col)
+                if not piece:
+                    continue
                 
-                # Verify move doesn't leave us in check
-                if not self.game.is_check(self.color):
-                    score = -self._negamax(current_depth - 1, float('-inf'), float('inf'), -1)
-                    if score > best_score:
-                        best_score = score
-                        best_move = (from_pos, to_pos)
-            finally:
-                board.move_piece(to_row, to_col, from_row, from_col)
-                if captured:
-                    board.place_piece(to_row, to_col, captured)
+                captured = board.get_piece(to_row, to_col)
+                
+                try:
+                    board.move_piece(from_row, from_col, to_row, to_col)
+                    
+                    if not self.game.is_check(self.color):
+                        score = -self._negamax(current_depth - 1, float('-inf'), float('inf'), -1)
+                        if score > best_score:
+                            best_score = score
+                            best_move = (from_pos, to_pos)
+                finally:
+                    board.move_piece(to_row, to_col, from_row, from_col)
+                    if captured:
+                        board.place_piece(to_row, to_col, captured)
+            
+            # Print initial search results
+            elapsed = time.time() - self.start_time
+            print(f"Depth {current_depth}: Score {best_score:.2f}, "
+                  f"Nodes: {self.nodes_searched}, Time: {elapsed:.2f}s")
+            
+            # Continue with iterative deepening if time permits
+            current_depth += 1
+            while (current_depth <= self.max_depth and
+                   time.time() - self.start_time < self.max_time - 0.1):
+                try:
+                    current_best_move = None
+                    current_best_score = float('-inf')
+                    
+                    for from_pos, to_pos in possible_moves:
+                        from_row, from_col = from_pos
+                        to_row, to_col = to_pos
+                        piece = board.get_piece(from_row, from_col)
+                        if not piece:
+                            continue
+                        
+                        captured = board.get_piece(to_row, to_col)
+                        try:
+                            board.move_piece(from_row, from_col, to_row, to_col)
+                            
+                            if not self.game.is_check(self.color):
+                                score = -self._negamax(current_depth - 1, float('-inf'), float('inf'), -1)
+                                if score > current_best_score:
+                                    current_best_score = score
+                                    current_best_move = (from_pos, to_pos)
+                        finally:
+                            board.move_piece(to_row, to_col, from_row, from_col)
+                            if captured:
+                                board.place_piece(to_row, to_col, captured)
+                    
+                    if current_best_move:
+                        best_move = current_best_move
+                        best_score = current_best_score
+                    
+                    elapsed = time.time() - self.start_time
+                    print(f"Depth {current_depth}: Score {best_score:.2f}, "
+                          f"Nodes: {self.nodes_searched}, Time: {elapsed:.2f}s")
+                    current_depth += 1
+                    
+                except TimeoutError:
+                    break
+                    
+        except TimeoutError:
+            pass  # Use best move found so far
+        
+        # If no move found or error occurred, use first valid move
+        if best_move is None:
+            best_move = first_valid_move
+            
+        return best_move
         
         # Print initial search results
         elapsed = time.time() - self.start_time
@@ -241,9 +320,13 @@ class AIEngine:
         """Negamax algorithm with alpha-beta pruning."""
         self.nodes_searched += 1
         
-        # Check if we should enter quiescence search
-        if depth == 0:
-            return color * self._quiescence(alpha, beta, color, 4)  # Max 4 ply quiescence
+        # Time check at the start of each node
+        if time.time() - self.start_time >= self.max_time - 0.1:
+            raise TimeoutError
+        
+        # Base case: at max depth, use quiescence search
+        if depth <= 0:
+            return color * self._quiescence(alpha, beta, color, 3)  # Reduced to 3 ply quiescence
         
         board = self.game.board
         possible_moves = self._get_ordered_moves(board)
@@ -255,41 +338,42 @@ class AIEngine:
         
         max_score = float('-inf')
         for from_pos, to_pos in possible_moves:
-            if time.time() - self.start_time >= self.max_time:
-                raise TimeoutError
-            
-            # Make move
             from_row, from_col = from_pos
             to_row, to_col = to_pos
             captured_piece = board.get_piece(to_row, to_col)
             piece = board.get_piece(from_row, from_col)
             
-            if not piece:  # Skip if no piece at source (shouldn't happen, but safety check)
+            if not piece:  # Skip if no piece at source
                 continue
-                
-            board.move_piece(from_row, from_col, to_row, to_col)
             
+            # Make move
             try:
-                score = -self._negamax(depth - 1, -beta, -alpha, -color)
-            except TimeoutError:
-                # Undo move before propagating timeout
-                board.move_piece(to_row, to_col, from_row, from_col)
-                if captured_piece:
-                    board.place_piece(to_row, to_col, captured_piece)
-                raise
-            
-            # Undo move
-            board.move_piece(to_row, to_col, from_row, from_col)
-            if captured_piece:
-                board.place_piece(to_row, to_col, captured_piece)
-            
-            # Update best score
-            max_score = max(max_score, score)
-            alpha = max(alpha, score)
+                board.move_piece(from_row, from_col, to_row, to_col)
+                
+                # Check if move is legal (doesn't put us in check)
+                if self.game.is_check(piece.color):
+                    score = float('-inf')
+                else:
+                    score = -self._negamax(depth - 1, -beta, -alpha, -color)
+                
+                # Update best score
+                max_score = max(max_score, score)
+                alpha = max(alpha, score)
+                
+            except (ValueError, TimeoutError) as e:
+                if isinstance(e, TimeoutError):
+                    raise
+            finally:
+                # Always undo the move
+                try:
+                    board.move_piece(to_row, to_col, from_row, from_col)
+                    if captured_piece:
+                        board.place_piece(to_row, to_col, captured_piece)
+                except ValueError:
+                    pass
             
             # Beta cutoff
             if alpha >= beta:
-                # Store killer move
                 if not captured_piece:
                     self.killer_moves[depth] = (from_pos, to_pos)
                 break
@@ -298,9 +382,17 @@ class AIEngine:
     
     def _quiescence(self, alpha: float, beta: float, color: int, depth: int) -> float:
         """Quiescence search to evaluate tactical positions."""
+        self.nodes_searched += 1
+        
+        # Time check
+        if time.time() - self.start_time >= self.max_time - 0.1:
+            raise TimeoutError
+        
+        # Base case
         if depth == 0:
             return color * self._evaluate_position()
         
+        # Stand pat score
         stand_pat = color * self._evaluate_position()
         if stand_pat >= beta:
             return beta
@@ -310,23 +402,36 @@ class AIEngine:
         captures = self._get_capturing_moves(self.game.board)
         
         for from_pos, to_pos in captures:
-            # Make capture
             from_row, from_col = from_pos
             to_row, to_col = to_pos
             captured_piece = self.game.board.get_piece(to_row, to_col)
             piece = self.game.board.get_piece(from_row, from_col)
             
-            self.game.board.move_piece(from_row, from_col, to_row, to_col)
-            
-            score = -self._quiescence(-beta, -alpha, -color, depth - 1)
-            
-            # Undo capture
-            self.game.board.move_piece(to_row, to_col, from_row, from_col)
-            self.game.board.place_piece(to_row, to_col, captured_piece)
-            
-            if score >= beta:
-                return beta
-            alpha = max(alpha, score)
+            if not piece:  # Safety check
+                continue
+                
+            try:
+                # Make capture
+                self.game.board.move_piece(from_row, from_col, to_row, to_col)
+                
+                # Check if capture is legal (doesn't put us in check)
+                if not self.game.is_check(piece.color):
+                    score = -self._quiescence(-beta, -alpha, -color, depth - 1)
+                    if score >= beta:
+                        return beta
+                    alpha = max(alpha, score)
+                
+            except (ValueError, TimeoutError) as e:
+                if isinstance(e, TimeoutError):
+                    raise
+            finally:
+                # Always undo the capture
+                try:
+                    self.game.board.move_piece(to_row, to_col, from_row, from_col)
+                    if captured_piece:
+                        self.game.board.place_piece(to_row, to_col, captured_piece)
+                except ValueError:
+                    pass
         
         return alpha
     
@@ -530,11 +635,21 @@ class AIEngine:
         board = self.game.board
         direction = 1 if color == 'black' else -1
         
+        # Verify row and column are within bounds
+        if not (0 <= row <= 7 and 0 <= col <= 7):
+            return False
+            
         for c_offset in [-1, 1]:
-            if 0 <= col + c_offset <= 7:
-                piece = board.get_piece(row + direction, col + c_offset)
-                if isinstance(piece, Pawn) and piece.color == color:
-                    return True
+            new_col = col + c_offset
+            new_row = row + direction
+            # Check if support pawn position is within bounds
+            if 0 <= new_row <= 7 and 0 <= new_col <= 7:
+                try:
+                    piece = board.get_piece(new_row, new_col)
+                    if isinstance(piece, Pawn) and piece.color == color:
+                        return True
+                except ValueError:
+                    continue
         return False
 
     def _is_open_file(self, col: int) -> bool:
@@ -568,6 +683,10 @@ class AIEngine:
         row, col = king_pos
         safety = 0
         
+        # Verify king position is valid
+        if not (0 <= row <= 7 and 0 <= col <= 7):
+            return 0
+        
         # Check pawn shield
         pawn_directions = [-1, 0, 1]  # Check files left, same, and right of king
         rank_offset = -1 if color == 'white' else 1  # Check rank in front of king
@@ -576,9 +695,12 @@ class AIEngine:
             new_col = col + file_offset
             new_row = row + rank_offset
             if (0 <= new_row <= 7 and 0 <= new_col <= 7):
-                piece = self.game.board.get_piece(new_row, new_col)
-                if isinstance(piece, Pawn) and piece.color == color:
-                    safety += 1  # Point for each protecting pawn
+                try:
+                    piece = self.game.board.get_piece(new_row, new_col)
+                    if isinstance(piece, Pawn) and piece.color == color:
+                        safety += 1  # Point for each protecting pawn
+                except ValueError:
+                    continue
         
         # Penalize for open files near king
         for file_offset in [-1, 0, 1]:
@@ -586,10 +708,13 @@ class AIEngine:
             if 0 <= new_col <= 7:
                 has_friendly_piece = False
                 for r in range(8):
-                    piece = self.game.board.get_piece(r, new_col)
-                    if piece and piece.color == color:
-                        has_friendly_piece = True
-                        break
+                    try:
+                        piece = self.game.board.get_piece(r, new_col)
+                        if piece and piece.color == color:
+                            has_friendly_piece = True
+                            break
+                    except ValueError:
+                        continue
                 if not has_friendly_piece:
                     safety -= 1  # Penalty for each open file
         
